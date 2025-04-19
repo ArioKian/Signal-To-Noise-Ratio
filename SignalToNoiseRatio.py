@@ -37,13 +37,26 @@ class SnrOnAES128:
         self.signalVariance = None
         self.noiseVariance = None
         self.signalToNoiseRatio = None
+        self.signalToNoiseRatioAllBytes = []
 
-    def plotSNR(self):
-        plt.figure(figsize=(12,4))
-        plt.plot(self.signalToNoiseRatio)
-        plt.title("SNR trace for HW leakage model")
-        plt.xlabel('Time sample')
-        plt.ylabel('SNR value')
+    def plotSNRtargetByte(self):
+        fig, ax1 = plt.subplots(1,1,figsize=(12, 5))
+        ax1.set_title("SNR trace for HW leakage model")
+        ax1.set_xlabel("Power Trace Time Sample")
+        ax1.set_ylabel("SNR value")
+        ax1.set_ylim(0, 0.1)
+        ax1.plot(self.signalToNoiseRatio)
+        plt.show()
+
+    def plotSNRallBytes(self):
+        fig, axs = plt.subplots(4,4,figsize=(16, 10))
+        for row in range(4):
+            for col in range(4):
+                axs[row, col].plot(self.signalToNoiseRatioAllBytes[(4*row)+col])
+                axs[row, col].set_title(f"SNR for Byte Number: {(4*row)+col}", size=10)
+                axs[row, col].set_ylim(0, 0.1)
+        fig.suptitle("SNR for All Bytes")
+        fig.subplots_adjust(hspace=0.5)
         plt.show()
 
     def SetCorrectKeys(self, correctKeys):
@@ -73,7 +86,18 @@ class SnrOnAES128:
     def HammingDistance(self, num1, num2):
         return self.HammingWeight(num1^num2)
     
-    def createCorrectHypothesis(self, byteNumber):
+    def ClearVariables(self):
+        self.correctHypothesis = None
+        self.HammingWeightLabels = None
+        self.groups = None
+        self.traceGroupMean ={}
+        self.powerTraceSignal = []
+        self.powerTraceNoise = []
+        self.signalVariance = None
+        self.noiseVariance = None
+        self.signalToNoiseRatio = None
+    
+    def CreateCorrectHypothesis(self, byteNumber):
         self.correctHypothesis = np.zeros(self.plainTexts.shape[0])
         print(self.correctHypothesis.shape)
         for i in range(self.plainTexts.shape[0]):
@@ -81,59 +105,73 @@ class SnrOnAES128:
         print("correctHypo: ",self.correctHypothesis)
         print("")
 
-    def calculateHwLabels(self):
+    def CalculateHwLabels(self):
         self.HammingWeightLabels = np.unique(self.correctHypothesis) # ===> HammingWeightLabels = [0,1,2,3,4,5,6,7,8]
 
-    def createEmptyGroups(self):
+    def CreateEmptyGroups(self):
         self.groups={}
         for i in range(self.HammingWeightLabels.shape[0]):
             self.groups[i]=[]
         print("size of groups: ",len(self.groups))
 
-    def fillGroups(self):
+    def FillGroups(self):
         for index, val in enumerate(self.correctHypothesis):
             self.groups[val].append(self.powerTraces[index])
         print("groups[3].shape: ", len(self.groups[3]) , len(self.groups[3][0]))
         print("groups[7].shape: ", len(self.groups[7]) , len(self.groups[7][0]))
 
-    def groupBasedOnHW(self):
-        self.calculateHwLabels()
+    def GroupBasedOnHW(self):
+        self.CalculateHwLabels()
         print("HammingWeightLabels: ",self.HammingWeightLabels)
-        self.createEmptyGroups()
-        self.fillGroups()
+        self.CreateEmptyGroups()
+        self.FillGroups()
         # return groups, HammingWeightLabels
 
-    def calculateSignal(self):
+    def CalculateSignal(self):
         for i in self.HammingWeightLabels:
             self.traceGroupMean[i]=np.mean(self.groups[i], axis=0)
             self.powerTraceSignal.append(self.traceGroupMean[i])
         print("signal trace shape: ",len(self.powerTraceSignal) , len(self.powerTraceSignal[0]))
         # return traceGroupMean, powerTraceSignal
 
-    def calculateNoise(self):
+    def CalculateNoise(self):
         for i in self.HammingWeightLabels:
             for trace in self.groups[i]:
                 self.powerTraceNoise.append(trace-self.traceGroupMean[i])
         print("noise trace shape: ",len(self.powerTraceNoise) , len(self.powerTraceNoise[0]))
         # return traceGroupMean, powerTraceNoise
 
-    def calculateSignalVariance(self):
+    def CalculateSignalVariance(self):
         self.signalVariance = np.var(self.powerTraceSignal, axis=0)
         # return signalVariance
 
-    def calculateNoiseVariance(self):
+    def CalculateNoiseVariance(self):
         self.noiseVariance = np.var(self.powerTraceNoise, axis=0)
         # return noiseVariance
 
-    def calculateSNRforTargetByte(self, targetByte):
-        self.createCorrectHypothesis(targetByte-1)
-        self.groupBasedOnHW()
-        self.calculateSignal()
-        self.calculateNoise()
-        self.calculateSignalVariance()
-        self.calculateNoiseVariance()
+    def SNRforTargetByte(self, targetByte):
+        self.ClearVariables()
+        self.CreateCorrectHypothesis(targetByte-1)
+        self.GroupBasedOnHW()
+        self.CalculateSignal()
+        self.CalculateNoise()
+        self.CalculateSignalVariance()
+        self.CalculateNoiseVariance()
         self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
         print(self.signalToNoiseRatio.shape)
-        self.plotSNR()
-        # plotSNR(signalToNoiseRatio)
-        # return signalToNoiseRatio
+        self.plotSNRtargetByte()
+
+    def SNRforAllBytes(self):
+        print("Calculating SNR for all Bytes:")
+        for i in range(16):
+            self.ClearVariables()
+            self.CreateCorrectHypothesis(i)
+            self.GroupBasedOnHW()
+            self.CalculateSignal()
+            self.CalculateNoise()
+            self.CalculateSignalVariance()
+            self.CalculateNoiseVariance()
+            self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
+            self.signalToNoiseRatioAllBytes.append(self.signalToNoiseRatio)
+        print(len(self.signalToNoiseRatioAllBytes), len(self.signalToNoiseRatioAllBytes[0]))
+        self.plotSNRallBytes()
