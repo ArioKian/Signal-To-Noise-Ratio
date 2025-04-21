@@ -38,25 +38,45 @@ class SnrOnAES128:
         self.noiseVariance = None
         self.signalToNoiseRatio = None
         self.signalToNoiseRatioAllBytes = []
+        self.maxSnrValue = None
+        self.progressBarEnabled = False
+
+    def enableProgressBar(self):
+        self.progressBarEnabled = True
+    
+    def disableProgressBar(self):
+        self.progressBarEnabled = False
+
+    def MaxSnrValueTargetByte(self, type):
+        if type=="Single":
+            self.maxSnrValue = np.max(self.signalToNoiseRatio)
+        elif type=="All":
+            self.maxSnrValue = np.max(self.signalToNoiseRatioAllBytes)
 
     def plotSNRtargetByte(self):
+        self.MaxSnrValueTargetByte("Single")
         fig, ax1 = plt.subplots(1,1,figsize=(12, 5))
         ax1.set_title("SNR trace for HW leakage model")
         ax1.set_xlabel("Power Trace Time Sample")
-        ax1.set_ylabel("SNR value")
-        ax1.set_ylim(0, 0.1)
+        ax1.set_ylabel("SNR Value")
+        ax1.set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
         ax1.plot(self.signalToNoiseRatio)
         plt.show()
 
     def plotSNRallBytes(self):
+        self.MaxSnrValueTargetByte("All")
         fig, axs = plt.subplots(4,4,figsize=(16, 10))
         for row in range(4):
             for col in range(4):
                 axs[row, col].plot(self.signalToNoiseRatioAllBytes[(4*row)+col])
-                axs[row, col].set_title(f"SNR for Byte Number: {(4*row)+col}", size=10)
-                axs[row, col].set_ylim(0, 0.1)
+                axs[row, col].set_title(f"SNR for Byte Number: {((4*row)+col)+1}", size=8)
+                axs[row, col].set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
+                axs[row, col].set_xlabel("Power Trace Time Sample", fontsize = 6)
+                axs[row, col].set_ylabel("SNR Value", fontsize = 6)
+                axs[row, col].tick_params(axis='both', which='major', labelsize=4)
+                axs[row, col].tick_params(axis='both', which='minor', labelsize=4)
         fig.suptitle("SNR for All Bytes")
-        fig.subplots_adjust(hspace=0.5)
+        fig.subplots_adjust(hspace=0.6, wspace=0.2)
         plt.show()
 
     def SetCorrectKeys(self, correctKeys):
@@ -99,11 +119,14 @@ class SnrOnAES128:
     
     def CreateCorrectHypothesis(self, byteNumber):
         self.correctHypothesis = np.zeros(self.plainTexts.shape[0])
-        print(self.correctHypothesis.shape)
+        print("*****************************************************************")
+        print(f"Creating Correct Hypothesis for Byte Number: {byteNumber+1}...")
         for i in range(self.plainTexts.shape[0]):
             self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
-        print("correctHypo: ",self.correctHypothesis)
-        print("")
+            if(self.progressBarEnabled):
+                self.ProgressBar(i, self.plainTexts.shape[0]-1)
+        if(self.progressBarEnabled):
+            print("")
 
     def CalculateHwLabels(self):
         self.HammingWeightLabels = np.unique(self.correctHypothesis) # ===> HammingWeightLabels = [0,1,2,3,4,5,6,7,8]
@@ -112,42 +135,48 @@ class SnrOnAES128:
         self.groups={}
         for i in range(self.HammingWeightLabels.shape[0]):
             self.groups[i]=[]
-        print("size of groups: ",len(self.groups))
 
     def FillGroups(self):
+        print(f"Grouping Power Traces...")
         for index, val in enumerate(self.correctHypothesis):
             self.groups[val].append(self.powerTraces[index])
-        print("groups[3].shape: ", len(self.groups[3]) , len(self.groups[3][0]))
-        print("groups[7].shape: ", len(self.groups[7]) , len(self.groups[7][0]))
+            if(self.progressBarEnabled):
+                self.ProgressBar(index, len(self.correctHypothesis)-1)
+        if(self.progressBarEnabled):
+            print("")
 
     def GroupBasedOnHW(self):
         self.CalculateHwLabels()
-        print("HammingWeightLabels: ",self.HammingWeightLabels)
         self.CreateEmptyGroups()
         self.FillGroups()
-        # return groups, HammingWeightLabels
 
     def CalculateSignal(self):
+        print(f"Calculating Signal Values...")
         for i in self.HammingWeightLabels:
             self.traceGroupMean[i]=np.mean(self.groups[i], axis=0)
             self.powerTraceSignal.append(self.traceGroupMean[i])
-        print("signal trace shape: ",len(self.powerTraceSignal) , len(self.powerTraceSignal[0]))
-        # return traceGroupMean, powerTraceSignal
+            if(self.progressBarEnabled):
+                self.ProgressBar(i, len(self.HammingWeightLabels)-1)
+        if(self.progressBarEnabled):
+            print("")
 
     def CalculateNoise(self):
+        print(f"Calculating Noise Values...")
         for i in self.HammingWeightLabels:
             for trace in self.groups[i]:
                 self.powerTraceNoise.append(trace-self.traceGroupMean[i])
-        print("noise trace shape: ",len(self.powerTraceNoise) , len(self.powerTraceNoise[0]))
-        # return traceGroupMean, powerTraceNoise
+            if(self.progressBarEnabled):
+                self.ProgressBar(i, len(self.HammingWeightLabels)-1)
+        if(self.progressBarEnabled):
+            print("")
 
     def CalculateSignalVariance(self):
+        print(f"Calculating Signal Variance...")
         self.signalVariance = np.var(self.powerTraceSignal, axis=0)
-        # return signalVariance
 
     def CalculateNoiseVariance(self):
+        print(f"Calculating Noise Variance...")
         self.noiseVariance = np.var(self.powerTraceNoise, axis=0)
-        # return noiseVariance
 
     def SNRforTargetByte(self, targetByte):
         self.ClearVariables()
@@ -157,8 +186,10 @@ class SnrOnAES128:
         self.CalculateNoise()
         self.CalculateSignalVariance()
         self.CalculateNoiseVariance()
+        print(f"Calculating Signal to Noise Ratio...")
         self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
-        print(self.signalToNoiseRatio.shape)
+        print("Process Finished Successfully.")
+        print("*****************************************************************")
         self.plotSNRtargetByte()
 
     def SNRforAllBytes(self):
@@ -171,7 +202,18 @@ class SnrOnAES128:
             self.CalculateNoise()
             self.CalculateSignalVariance()
             self.CalculateNoiseVariance()
+            print(f"Calculating Signal to Noise Ratio...")
             self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
             self.signalToNoiseRatioAllBytes.append(self.signalToNoiseRatio)
-        print(len(self.signalToNoiseRatioAllBytes), len(self.signalToNoiseRatioAllBytes[0]))
+        print("Process Finished Successfully.")
+        print("*****************************************************************")
         self.plotSNRallBytes()
+
+
+    def ProgressBar(self, count_value, total, suffix=''):
+        bar_length = 100
+        filled_up_Length = int(round(bar_length* count_value / float(total)))
+        percentage = round(100.0 * count_value/float(total),1)
+        bar = '=' * filled_up_Length + '-' * (bar_length - filled_up_Length)
+        sys.stdout.write('[%s] %s%s ...%s\r' %(bar, percentage, '%', suffix))
+        sys.stdout.flush()
