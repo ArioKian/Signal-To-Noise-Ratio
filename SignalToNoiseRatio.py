@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 import os
 from tqdm import tqdm 
+from progress.spinner import MoonSpinner
 
 class SnrOnAES128:
     sboxTable = (
@@ -53,30 +54,42 @@ class SnrOnAES128:
         elif type=="All":
             self.maxSnrValue = np.max(self.signalToNoiseRatioAllBytes)
 
-    def plotSNRtargetByte(self):
+    def plotSNRtargetByte(self,targetByte, singleRun=False):
+        self.CheckOutputsDirectory(targetByte)
         self.MaxSnrValueTargetByte("Single")
         fig, ax1 = plt.subplots(1,1,figsize=(12, 5))
-        ax1.set_title("SNR trace for HW leakage model")
+        ax1.set_title(f"SNR for Byte Number: {targetByte} using HW Leakage Model")
         ax1.set_xlabel("Power Trace Time Sample")
         ax1.set_ylabel("SNR Value")
         ax1.set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
         ax1.plot(self.signalToNoiseRatio)
-        plt.show()
+        plt.savefig(f"./Outputs/SNR_forTargetByte_{targetByte}.jpg")
+        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.jpg) from this execution is stored at ./Outputs directory.")
+        plt.savefig(f"./Outputs/SNR_forTargetByte_{targetByte}.pdf")
+        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.pdf) from this execution is stored at ./Outputs directory.")
+        if singleRun:
+            plt.show()
+        
 
     def plotSNRallBytes(self):
+        self.CheckOutputsDirectory("All")
         self.MaxSnrValueTargetByte("All")
         fig, axs = plt.subplots(4,4,figsize=(16, 10))
         for row in range(4):
             for col in range(4):
                 axs[row, col].plot(self.signalToNoiseRatioAllBytes[(4*row)+col])
-                axs[row, col].set_title(f"SNR for Byte Number: {((4*row)+col)+1}", size=8)
+                axs[row, col].set_title(f"Byte Number: {((4*row)+col)+1}", size=8)
                 axs[row, col].set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
                 axs[row, col].set_xlabel("Power Trace Time Sample", fontsize = 6)
                 axs[row, col].set_ylabel("SNR Value", fontsize = 6)
                 axs[row, col].tick_params(axis='both', which='major', labelsize=4)
                 axs[row, col].tick_params(axis='both', which='minor', labelsize=4)
-        fig.suptitle("SNR for All Bytes")
+        fig.suptitle("SNR for All Bytes using HW Leakage Model")
         fig.subplots_adjust(hspace=0.6, wspace=0.2)
+        plt.savefig(f"./Outputs/SNR_forAllTargetByte.jpg")
+        print(f"INFO: The output file (SNR_forAllTargetByte.jpg) from this execution is stored at ./Outputs directory.")
+        plt.savefig(f"./Outputs/SNR_forAllTargetByte.pdf")
+        print(f"INFO: The output file (SNR_forAllTargetByte.pdf) from this execution is stored at ./Outputs directory.")
         plt.show()
 
     def SetCorrectKeys(self, correctKeys):
@@ -120,13 +133,15 @@ class SnrOnAES128:
     def CreateCorrectHypothesis(self, byteNumber):
         self.correctHypothesis = np.zeros(self.plainTexts.shape[0])
         print("*****************************************************************")
-        print(f"Creating Correct Hypothesis for Byte Number: {byteNumber+1}...")
-        for i in range(self.plainTexts.shape[0]):
-            self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+        print(f"Creating Correct Hypothesis for Byte Number: {byteNumber+1}")
+        with MoonSpinner('Processing…') as bar:
+            for i in range(self.plainTexts.shape[0]):
+                self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+                bar.next()
+                if(self.progressBarEnabled):
+                    self.ProgressBar(i, self.plainTexts.shape[0]-1)
             if(self.progressBarEnabled):
-                self.ProgressBar(i, self.plainTexts.shape[0]-1)
-        if(self.progressBarEnabled):
-            print("")
+                print("")
 
     def CalculateHwLabels(self):
         self.HammingWeightLabels = np.unique(self.correctHypothesis) # ===> HammingWeightLabels = [0,1,2,3,4,5,6,7,8]
@@ -137,13 +152,15 @@ class SnrOnAES128:
             self.groups[i]=[]
 
     def FillGroups(self):
-        print(f"Grouping Power Traces...")
-        for index, val in enumerate(self.correctHypothesis):
-            self.groups[val].append(self.powerTraces[index])
+        print(f"Grouping Power Traces:")
+        with MoonSpinner('Processing…') as bar:
+            for index, val in enumerate(self.correctHypothesis):
+                self.groups[val].append(self.powerTraces[index])
+                bar.next()
+                if(self.progressBarEnabled):
+                    self.ProgressBar(index, len(self.correctHypothesis)-1)
             if(self.progressBarEnabled):
-                self.ProgressBar(index, len(self.correctHypothesis)-1)
-        if(self.progressBarEnabled):
-            print("")
+                print("")
 
     def GroupBasedOnHW(self):
         self.CalculateHwLabels()
@@ -151,24 +168,28 @@ class SnrOnAES128:
         self.FillGroups()
 
     def CalculateSignal(self):
-        print(f"Calculating Signal Values...")
-        for i in self.HammingWeightLabels:
-            self.traceGroupMean[i]=np.mean(self.groups[i], axis=0)
-            self.powerTraceSignal.append(self.traceGroupMean[i])
+        print(f"Calculating Signal Values:")
+        with MoonSpinner('Processing…') as bar:
+            for i in self.HammingWeightLabels:
+                self.traceGroupMean[i]=np.mean(self.groups[i], axis=0)
+                self.powerTraceSignal.append(self.traceGroupMean[i])
+                bar.next()
+                if(self.progressBarEnabled):
+                    self.ProgressBar(i, len(self.HammingWeightLabels)-1)
             if(self.progressBarEnabled):
-                self.ProgressBar(i, len(self.HammingWeightLabels)-1)
-        if(self.progressBarEnabled):
-            print("")
+                print("")
 
     def CalculateNoise(self):
-        print(f"Calculating Noise Values...")
-        for i in self.HammingWeightLabels:
-            for trace in self.groups[i]:
-                self.powerTraceNoise.append(trace-self.traceGroupMean[i])
+        print(f"Calculating Noise Values:")
+        with MoonSpinner('Processing…') as bar:
+            for i in self.HammingWeightLabels:
+                for trace in self.groups[i]:
+                    self.powerTraceNoise.append(trace-self.traceGroupMean[i])
+                bar.next()
+                if(self.progressBarEnabled):
+                    self.ProgressBar(i, len(self.HammingWeightLabels)-1)
             if(self.progressBarEnabled):
-                self.ProgressBar(i, len(self.HammingWeightLabels)-1)
-        if(self.progressBarEnabled):
-            print("")
+                print("")
 
     def CalculateSignalVariance(self):
         print(f"Calculating Signal Variance...")
@@ -188,9 +209,9 @@ class SnrOnAES128:
         self.CalculateNoiseVariance()
         print(f"Calculating Signal to Noise Ratio...")
         self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
+        self.plotSNRtargetByte(targetByte, singleRun=True)
         print("Process Finished Successfully.")
         print("*****************************************************************")
-        self.plotSNRtargetByte()
 
     def SNRforAllBytes(self):
         print("Calculating SNR for all Bytes:")
@@ -205,9 +226,10 @@ class SnrOnAES128:
             print(f"Calculating Signal to Noise Ratio...")
             self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
             self.signalToNoiseRatioAllBytes.append(self.signalToNoiseRatio)
+            self.plotSNRtargetByte(i)
+        self.plotSNRallBytes()
         print("Process Finished Successfully.")
         print("*****************************************************************")
-        self.plotSNRallBytes()
 
 
     def ProgressBar(self, count_value, total, suffix=''):
@@ -217,3 +239,28 @@ class SnrOnAES128:
         bar = '=' * filled_up_Length + '-' * (bar_length - filled_up_Length)
         sys.stdout.write('[%s] %s%s ...%s\r' %(bar, percentage, '%', suffix))
         sys.stdout.flush()
+
+    def DeleteFilesInDirectory(self, directoryPath, targetByte):
+        try:
+            files = os.listdir(directoryPath)
+            for file in files:
+                if targetByte == "All":
+                    if file== f"SNR_forAllTargetByte.jpg" or file== f"SNR_forAllTargetByte.pdf":
+                        filePath = os.path.join(directoryPath, file)
+                        if os.path.isfile(filePath):
+                            os.remove(filePath)
+                        print(f"INFO: The file ({file}) from the previous execution deleted successfully.")
+                if file== f"SNR_forTargetByte_{targetByte}.jpg" or file== f"SNR_forTargetByte_{targetByte}.pdf":
+                    filePath = os.path.join(directoryPath, file)
+                    if os.path.isfile(filePath):
+                        os.remove(filePath)
+                    print(f"INFO: The file ({file}) from the previous execution deleted successfully.")
+        except OSError:
+            print("Err: Error occurred while deleting previous output files.")
+
+    def CheckOutputsDirectory(self, targetByte=None):
+        isDirExist = os.path.exists('Outputs')
+        if isDirExist:
+            self.DeleteFilesInDirectory('./Outputs',targetByte)
+        else:
+            os.makedirs('Outputs')
