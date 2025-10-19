@@ -13,6 +13,7 @@ keys = keys[0]
 
 snrObj = SNR()
 
+snrObj.SetLeakageModel("HW")
 snrObj.SetPlainTexts(plains)
 snrObj.SetPowerTraces(powerTraces)
 snrObj.SetCorrectKeys(keys)
@@ -20,10 +21,12 @@ snrObj.SetCorrectKeys(keys)
 returnedPlain = snrObj.GetPlainTexts()
 returnedTraces = snrObj.GetPowerTraces()
 returnedkeys = snrObj.GetCorrectKeys()
+returnedLeakageModel = snrObj.GetLeakageModel()
 
 print("returnedPlain.shape=", returnedPlain.shape)
 print("returnedTraces.shape=", returnedTraces.shape)
 print("returnedkeys.shape=", returnedkeys.shape)
+print("returnedLeakageModel=", returnedLeakageModel)
 
 # snrObj.SNRforTargetByte(1,"pooled")
 snrObj.SNRforAllBytes("pooled")
