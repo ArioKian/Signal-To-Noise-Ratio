@@ -27,6 +27,7 @@ class SnrOnAES128:
     )
 
     def __init__(self):
+        self.leakageModel = None
         self.plainTexts = None
         self.powerTraces = None
         self.correctKeys = None
@@ -41,13 +42,6 @@ class SnrOnAES128:
         self.signalToNoiseRatio = None
         self.signalToNoiseRatioAllBytes = []
         self.maxSnrValue = None
-        self.progressBarEnabled = False
-
-    def enableProgressBar(self):
-        self.progressBarEnabled = True
-    
-    def disableProgressBar(self):
-        self.progressBarEnabled = False
 
     def MaxSnrValueTargetByte(self, type):
         if type=="Single":
@@ -102,6 +96,12 @@ class SnrOnAES128:
     def SetPlainTexts(self, plainTexts):
         self.plainTexts = plainTexts
 
+    def SetLeakageModel(self, leakageModel):
+        if(leakageModel=="HW" or leakageModel=="HD"):
+            self.leakageModel = leakageModel
+        else:
+            exit("THE LEAKAGE MODEL IS SET INCORRECTLY!!! \n PLEASE SET AS: \"HW\" or \"HD\"")
+
     def GetCorrectKeys(self):
         return self.correctKeys
         
@@ -110,6 +110,9 @@ class SnrOnAES128:
 
     def GetPowerTraces(self):
         return self.powerTraces
+    
+    def GetLeakageModel(self):
+        return self.leakageModel
     
     def Sbox(self, inp):
         return self.sboxTable[inp]
@@ -131,18 +134,32 @@ class SnrOnAES128:
         self.noiseVariance = None
         self.signalToNoiseRatio = None
     
-    def CreateCorrectHypothesis(self, byteNumber):
-        self.correctHypothesis = np.zeros(self.plainTexts.shape[0])
+    def CheckLeakageModel(self):
+        print("*****************************************************************")
+        print("Checking the Leakage Model Settings...")
+        if(self.leakageModel=="HW" or self.leakageModel=="HD"):
+            print("Leakage Model is Correctly Set.")
+        else:
+            exit("THE LEAKAGE MODEL IS NOT SET!!! \n PLEASE SET THE LEAKAGE MODEL Through SetLeakageModel(\"HW\") or SetLeakageModel(\"HD\") Method.")
+
+    def CreateCorrectHypothesis(self, byteNumber, leakageModel=None):
         print("*****************************************************************")
         print(f"Creating Correct Hypothesis for Byte Number: {byteNumber+1}")
-        with MoonSpinner('Processing…') as bar:
-            for i in range(self.plainTexts.shape[0]):
-                self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
-                bar.next()
-                if(self.progressBarEnabled):
-                    self.ProgressBar(i, self.plainTexts.shape[0]-1)
-            if(self.progressBarEnabled):
-                print("")
+        if(self.leakageModel=="HW"):
+            self.correctHypothesis = np.zeros(self.plainTexts.shape[0], dtype=np.uint8)
+            with MoonSpinner('Processing…') as bar:
+                for i in range(self.plainTexts.shape[0]):
+                    self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+                    bar.next()
+        elif(self.leakageModel=="HD"):
+            self.correctHypothesis = np.zeros(self.plainTexts.shape[0], dtype=np.uint8)
+            with MoonSpinner('Processing…') as bar:
+                for i in range(self.plainTexts.shape[0]):
+                    if(i==0):
+                        self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+                    else:
+                        self.correctHypothesis[i] = self.HammingWeight((self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))^(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i-1][byteNumber])))
+                    bar.next()
 
     def CalculateHwLabels(self):
         self.HammingWeightLabels = np.unique(self.correctHypothesis) # ===> HammingWeightLabels = [0,1,2,3,4,5,6,7,8]
@@ -158,12 +175,8 @@ class SnrOnAES128:
             for index, val in enumerate(self.correctHypothesis):
                 self.groups[val].append(self.powerTraces[index])
                 bar.next()
-                if(self.progressBarEnabled):
-                    self.ProgressBar(index, len(self.correctHypothesis)-1)
-            if(self.progressBarEnabled):
-                print("")
 
-    def GroupBasedOnHW(self):
+    def GroupPowerTraces(self):
         self.CalculateHwLabels()
         self.CreateEmptyGroups()
         self.FillGroups()
@@ -175,10 +188,6 @@ class SnrOnAES128:
                 self.traceGroupMean[i]=np.mean(self.groups[i], axis=0)
                 self.powerTraceSignal.append(self.traceGroupMean[i])
                 bar.next()
-                if(self.progressBarEnabled):
-                    self.ProgressBar(i, len(self.HammingWeightLabels)-1)
-            if(self.progressBarEnabled):
-                print("")
 
     def CalculateNoise(self):
         print(f"Calculating Noise Values:")
@@ -187,10 +196,6 @@ class SnrOnAES128:
                 for trace in self.groups[i]:
                     self.powerTraceNoise.append(trace-self.traceGroupMean[i])
                 bar.next()
-                if(self.progressBarEnabled):
-                    self.ProgressBar(i, len(self.HammingWeightLabels)-1)
-            if(self.progressBarEnabled):
-                print("")
 
     def CalculateSignalVariance(self):
         print(f"Calculating Signal Variance...")
@@ -204,9 +209,10 @@ class SnrOnAES128:
         self.noiseVariance = np.mean([np.var(self.groups[i] - self.traceGroupMean[i], axis=0) for i in self.HammingWeightLabels], axis=0)   
 
     def SNRforTargetByte(self, targetByte, noiseVarType):
+        self.CheckLeakageModel()
         self.ClearVariables()
         self.CreateCorrectHypothesis(targetByte-1)
-        self.GroupBasedOnHW()
+        self.GroupPowerTraces()
         self.CalculateSignal()
         self.CalculateSignalVariance()
         if(noiseVarType=="pooled"):
@@ -221,11 +227,12 @@ class SnrOnAES128:
         print("*****************************************************************")
 
     def SNRforAllBytes(self,noiseVarType):
+        self.CheckLeakageModel()
         print("Calculating SNR for all Bytes:")
         for i in range(16):
             self.ClearVariables()
             self.CreateCorrectHypothesis(i)
-            self.GroupBasedOnHW()
+            self.GroupPowerTraces()
             self.CalculateSignal()
             self.CalculateSignalVariance()
             if(noiseVarType=="pooled"):
@@ -241,17 +248,8 @@ class SnrOnAES128:
         print("Process Finished Successfully.")
         print("*****************************************************************")
 
-
-    def ProgressBar(self, count_value, total, suffix=''):
-        bar_length = 100
-        filled_up_Length = int(round(bar_length* count_value / float(total)))
-        percentage = round(100.0 * count_value/float(total),1)
-        bar = '=' * filled_up_Length + '-' * (bar_length - filled_up_Length)
-        sys.stdout.write('[%s] %s%s ...%s\r' %(bar, percentage, '%', suffix))
-        sys.stdout.flush()
-
     def CheckOutputsDirectory(self):
-        isDirExist = os.path.exists('Statistics_Outputs')
+        isDirExist = os.path.exists('SNR_Outputs')
         if(not(isDirExist)):
             self.CreateOutputDirectory()
 
