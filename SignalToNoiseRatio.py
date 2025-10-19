@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 import os
 from tqdm import tqdm 
+from datetime import datetime
 from progress.spinner import MoonSpinner
 
 class SnrOnAES128:
@@ -55,7 +56,7 @@ class SnrOnAES128:
             self.maxSnrValue = np.max(self.signalToNoiseRatioAllBytes)
 
     def plotSNRtargetByte(self,targetByte, singleRun=False):
-        self.CheckOutputsDirectory(targetByte)
+        outputsAddress = self.CreateOutputSubDirectory(f"SNR_Byte{targetByte}")
         self.MaxSnrValueTargetByte("Single")
         fig, ax1 = plt.subplots(1,1,figsize=(12, 5))
         ax1.set_title(f"SNR for Byte Number: {targetByte} using HW Leakage Model")
@@ -63,16 +64,16 @@ class SnrOnAES128:
         ax1.set_ylabel("SNR Value")
         ax1.set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
         ax1.plot(self.signalToNoiseRatio)
-        plt.savefig(f"./Outputs/SNR_forTargetByte_{targetByte}.jpg")
-        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.jpg) from this execution is stored at ./Outputs directory.")
-        plt.savefig(f"./Outputs/SNR_forTargetByte_{targetByte}.pdf")
-        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.pdf) from this execution is stored at ./Outputs directory.")
+        plt.savefig(f"./{outputsAddress}/SNR_forTargetByte_{targetByte}.jpg")
+        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.jpg) from this execution is stored at ./{outputsAddress} directory.")
+        plt.savefig(f"./{outputsAddress}/SNR_forTargetByte_{targetByte}.pdf")
+        print(f"INFO: The output file (SNR_forTargetByte_{targetByte}.pdf) from this execution is stored at ./{outputsAddress} directory.")
         if singleRun:
             plt.show()
         
 
     def plotSNRallBytes(self):
-        self.CheckOutputsDirectory("All")
+        outputsAddress = self.CreateOutputSubDirectory(f"SNR_AllBytes")
         self.MaxSnrValueTargetByte("All")
         fig, axs = plt.subplots(4,4,figsize=(16, 10))
         for row in range(4):
@@ -86,10 +87,10 @@ class SnrOnAES128:
                 axs[row, col].tick_params(axis='both', which='minor', labelsize=4)
         fig.suptitle("SNR for All Bytes using HW Leakage Model")
         fig.subplots_adjust(hspace=0.6, wspace=0.2)
-        plt.savefig(f"./Outputs/SNR_forAllTargetByte.jpg")
-        print(f"INFO: The output file (SNR_forAllTargetByte.jpg) from this execution is stored at ./Outputs directory.")
-        plt.savefig(f"./Outputs/SNR_forAllTargetByte.pdf")
-        print(f"INFO: The output file (SNR_forAllTargetByte.pdf) from this execution is stored at ./Outputs directory.")
+        plt.savefig(f"./{outputsAddress}/SNR_forAllTargetByte.jpg")
+        print(f"INFO: The output file (SNR_forAllTargetByte.jpg) from this execution is stored at ./{outputsAddress} directory.")
+        plt.savefig(f"./{outputsAddress}/SNR_forAllTargetByte.pdf")
+        print(f"INFO: The output file (SNR_forAllTargetByte.pdf) from this execution is stored at ./{outputsAddress} directory.")
         plt.show()
 
     def SetCorrectKeys(self, correctKeys):
@@ -195,34 +196,43 @@ class SnrOnAES128:
         print(f"Calculating Signal Variance...")
         self.signalVariance = np.var(self.powerTraceSignal, axis=0)
 
-    def CalculateNoiseVariance(self):
+    def CalculateNoiseVariancePooled(self):
         print(f"Calculating Noise Variance...")
         self.noiseVariance = np.var(self.powerTraceNoise, axis=0)
 
-    def SNRforTargetByte(self, targetByte):
+    def CalculateNoiseVariancePerClassAvg(self):
+        self.noiseVariance = np.mean([np.var(self.groups[i] - self.traceGroupMean[i], axis=0) for i in self.HammingWeightLabels], axis=0)   
+
+    def SNRforTargetByte(self, targetByte, noiseVarType):
         self.ClearVariables()
         self.CreateCorrectHypothesis(targetByte-1)
         self.GroupBasedOnHW()
         self.CalculateSignal()
-        self.CalculateNoise()
         self.CalculateSignalVariance()
-        self.CalculateNoiseVariance()
+        if(noiseVarType=="pooled"):
+            self.CalculateNoise()
+            self.CalculateNoiseVariancePooled()
+        if(noiseVarType=="perClassAvg"):
+            self.CalculateNoiseVariancePerClassAvg()
         print(f"Calculating Signal to Noise Ratio...")
         self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
         self.plotSNRtargetByte(targetByte, singleRun=True)
         print("Process Finished Successfully.")
         print("*****************************************************************")
 
-    def SNRforAllBytes(self):
+    def SNRforAllBytes(self,noiseVarType):
         print("Calculating SNR for all Bytes:")
         for i in range(16):
             self.ClearVariables()
             self.CreateCorrectHypothesis(i)
             self.GroupBasedOnHW()
             self.CalculateSignal()
-            self.CalculateNoise()
             self.CalculateSignalVariance()
-            self.CalculateNoiseVariance()
+            if(noiseVarType=="pooled"):
+                self.CalculateNoise()
+                self.CalculateNoiseVariancePooled()
+            if(noiseVarType=="perClassAvg"):
+                self.CalculateNoiseVariancePerClassAvg()
             print(f"Calculating Signal to Noise Ratio...")
             self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
             self.signalToNoiseRatioAllBytes.append(self.signalToNoiseRatio)
@@ -240,27 +250,25 @@ class SnrOnAES128:
         sys.stdout.write('[%s] %s%s ...%s\r' %(bar, percentage, '%', suffix))
         sys.stdout.flush()
 
-    def DeleteFilesInDirectory(self, directoryPath, targetByte):
-        try:
-            files = os.listdir(directoryPath)
-            for file in files:
-                if targetByte == "All":
-                    if file== f"SNR_forAllTargetByte.jpg" or file== f"SNR_forAllTargetByte.pdf":
-                        filePath = os.path.join(directoryPath, file)
-                        if os.path.isfile(filePath):
-                            os.remove(filePath)
-                        print(f"INFO: The file ({file}) from the previous execution deleted successfully.")
-                if file== f"SNR_forTargetByte_{targetByte}.jpg" or file== f"SNR_forTargetByte_{targetByte}.pdf":
-                    filePath = os.path.join(directoryPath, file)
-                    if os.path.isfile(filePath):
-                        os.remove(filePath)
-                    print(f"INFO: The file ({file}) from the previous execution deleted successfully.")
-        except OSError:
-            print("Err: Error occurred while deleting previous output files.")
+    def CheckOutputsDirectory(self):
+        isDirExist = os.path.exists('Statistics_Outputs')
+        if(not(isDirExist)):
+            self.CreateOutputDirectory()
 
-    def CheckOutputsDirectory(self, targetByte=None):
-        isDirExist = os.path.exists('Outputs')
-        if isDirExist:
-            self.DeleteFilesInDirectory('./Outputs',targetByte)
+    def CreateOutputDirectory(self):
+        print("*****************************************************************")
+        print("Creating SNR_Outputs directory...")
+        os.makedirs('SNR_Outputs')
+
+    def CreateOutputSubDirectory(self, customName = None):
+        self.CheckOutputsDirectory()
+        print("*****************************************************************")
+        print("Creating sub-directory for this run...")
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        if(customName != None):
+            output_dir = f"./SNR_Outputs/{customName}_results_{timestamp}"
         else:
-            os.makedirs('Outputs')
+            output_dir = f"./SNR_Outputs/results_{timestamp}"
+        os.makedirs(output_dir, exist_ok=True)
+        return output_dir
