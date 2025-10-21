@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
-from tqdm import tqdm 
 from datetime import datetime
 from progress.spinner import MoonSpinner
 
@@ -49,11 +48,11 @@ class SnrOnAES128:
         elif type=="All":
             self.maxSnrValue = np.max(self.signalToNoiseRatioAllBytes)
 
-    def plotSNRtargetByte(self,targetByte, singleRun=False):
-        outputsAddress = self.CreateOutputSubDirectory(f"SNR_Byte{targetByte}")
+    def plotSNRtargetByte(self,targetByte, singleRun=False, noiseVarType=None):
+        outputsAddress = self.CreateOutputSubDirectory(f"{self.leakageModel}_{noiseVarType}_SNR_Byte{targetByte}")
         self.MaxSnrValueTargetByte("Single")
         fig, ax1 = plt.subplots(1,1,figsize=(12, 5))
-        ax1.set_title(f"SNR for Byte Number: {targetByte} using HW Leakage Model")
+        ax1.set_title(f"{noiseVarType} SNR for Byte Number: {targetByte} using {self.leakageModel} Leakage Model")
         ax1.set_xlabel("Power Trace Time Sample")
         ax1.set_ylabel("SNR Value")
         ax1.set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
@@ -66,20 +65,20 @@ class SnrOnAES128:
             plt.show()
         
 
-    def plotSNRallBytes(self):
-        outputsAddress = self.CreateOutputSubDirectory(f"SNR_AllBytes")
+    def plotSNRallBytes(self, noiseVarType=None):
+        outputsAddress = self.CreateOutputSubDirectory(f"{self.leakageModel}_{noiseVarType}_SNR_AllBytes")
         self.MaxSnrValueTargetByte("All")
         fig, axs = plt.subplots(4,4,figsize=(16, 10))
         for row in range(4):
             for col in range(4):
                 axs[row, col].plot(self.signalToNoiseRatioAllBytes[(4*row)+col])
                 axs[row, col].set_title(f"Byte Number: {((4*row)+col)+1}", size=8)
-                axs[row, col].set_ylim(0, (self.maxSnrValue + (self.maxSnrValue/10)))
+                axs[row, col].set_ylim(0, np.max([0.15, (self.maxSnrValue + (self.maxSnrValue/10))]))
                 axs[row, col].set_xlabel("Power Trace Time Sample", fontsize = 6)
                 axs[row, col].set_ylabel("SNR Value", fontsize = 6)
                 axs[row, col].tick_params(axis='both', which='major', labelsize=4)
                 axs[row, col].tick_params(axis='both', which='minor', labelsize=4)
-        fig.suptitle("SNR for All Bytes using HW Leakage Model")
+        fig.suptitle(f"{noiseVarType} SNR for All Bytes using {self.leakageModel} Leakage Model")
         fig.subplots_adjust(hspace=0.6, wspace=0.2)
         plt.savefig(f"./{outputsAddress}/SNR_forAllTargetByte.jpg")
         print(f"INFO: The output file (SNR_forAllTargetByte.jpg) from this execution is stored at ./{outputsAddress} directory.")
@@ -92,15 +91,16 @@ class SnrOnAES128:
 
     def SetPowerTraces(self, powerTraces):
         self.powerTraces = powerTraces
+        self.powerTraces = self.powerTraces.astype(np.float32)
 
     def SetPlainTexts(self, plainTexts):
         self.plainTexts = plainTexts
 
     def SetLeakageModel(self, leakageModel):
-        if(leakageModel=="HW" or leakageModel=="HD"):
+        if(leakageModel=="HW" or leakageModel=="HDv1" or leakageModel=="HDv2" or leakageModel=="HDv3"):
             self.leakageModel = leakageModel
         else:
-            exit("THE LEAKAGE MODEL IS SET INCORRECTLY!!! \n PLEASE SET AS: \"HW\" or \"HD\"")
+            exit("THE LEAKAGE MODEL IS SET INCORRECTLY!!! \n PLEASE SET AS: \"HW\" or \"HDv1\" or \"HDv2\" or \"HDv3\"")
 
     def GetCorrectKeys(self):
         return self.correctKeys
@@ -137,12 +137,12 @@ class SnrOnAES128:
     def CheckLeakageModel(self):
         print("*****************************************************************")
         print("Checking the Leakage Model Settings...")
-        if(self.leakageModel=="HW" or self.leakageModel=="HD"):
-            print("Leakage Model is Correctly Set.")
+        if(self.leakageModel=="HW" or self.leakageModel=="HDv1" or self.leakageModel=="HDv2" or self.leakageModel=="HDv3"):
+            print(f"Leakage Model is Correctly Set as {self.leakageModel}.")
         else:
-            exit("THE LEAKAGE MODEL IS NOT SET!!! \n PLEASE SET THE LEAKAGE MODEL Through SetLeakageModel(\"HW\") or SetLeakageModel(\"HD\") Method.")
+            exit("THE LEAKAGE MODEL IS NOT SET!!! \n PLEASE SET THE LEAKAGE MODEL Through SetLeakageModel(\"HW\") or SetLeakageModel(\"HDv1\") or SetLeakageModel(\"HDv2\") or SetLeakageModel(\"HDv3\") Method.")
 
-    def CreateCorrectHypothesis(self, byteNumber, leakageModel=None):
+    def CreateCorrectHypothesis(self, byteNumber):
         print("*****************************************************************")
         print(f"Creating Correct Hypothesis for Byte Number: {byteNumber+1}")
         if(self.leakageModel=="HW"):
@@ -151,7 +151,7 @@ class SnrOnAES128:
                 for i in range(self.plainTexts.shape[0]):
                     self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
                     bar.next()
-        elif(self.leakageModel=="HD"):
+        elif(self.leakageModel=="HDv1"):
             self.correctHypothesis = np.zeros(self.plainTexts.shape[0], dtype=np.uint8)
             with MoonSpinner('Processing…') as bar:
                 for i in range(self.plainTexts.shape[0]):
@@ -159,6 +159,24 @@ class SnrOnAES128:
                         self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
                     else:
                         self.correctHypothesis[i] = self.HammingWeight((self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))^(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i-1][byteNumber])))
+                    bar.next()
+        elif(self.leakageModel=="HDv2"):
+            self.correctHypothesis = np.zeros(self.plainTexts.shape[0], dtype=np.uint8)
+            with MoonSpinner('Processing…') as bar:
+                for i in range(self.plainTexts.shape[0]):
+                    if(i==0):
+                        self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+                    else:
+                        self.correctHypothesis[i] = self.HammingWeight((self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))^(self.plainTexts[i-1][byteNumber]))
+                    bar.next()
+        elif(self.leakageModel=="HDv3"):
+            self.correctHypothesis = np.zeros(self.plainTexts.shape[0], dtype=np.uint8)
+            with MoonSpinner('Processing…') as bar:
+                for i in range(self.plainTexts.shape[0]):
+                    if(i==0):
+                        self.correctHypothesis[i] = self.HammingWeight(self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))
+                    else:
+                        self.correctHypothesis[i] = self.HammingWeight((self.Sbox(self.correctKeys[byteNumber] ^ self.plainTexts[i][byteNumber]))^(self.correctKeys[byteNumber] ^ self.plainTexts[i-1][byteNumber]))
                     bar.next()
 
     def CalculateHwLabels(self):
@@ -222,7 +240,7 @@ class SnrOnAES128:
             self.CalculateNoiseVariancePerClassAvg()
         print(f"Calculating Signal to Noise Ratio...")
         self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
-        self.plotSNRtargetByte(targetByte, singleRun=True)
+        self.plotSNRtargetByte(targetByte, singleRun=True, noiseVarType=noiseVarType)
         print("Process Finished Successfully.")
         print("*****************************************************************")
 
@@ -243,8 +261,8 @@ class SnrOnAES128:
             print(f"Calculating Signal to Noise Ratio...")
             self.signalToNoiseRatio = self.signalVariance/self.noiseVariance
             self.signalToNoiseRatioAllBytes.append(self.signalToNoiseRatio)
-            self.plotSNRtargetByte(i)
-        self.plotSNRallBytes()
+            self.plotSNRtargetByte(i,singleRun=False,noiseVarType=noiseVarType)
+        self.plotSNRallBytes(noiseVarType=noiseVarType)
         print("Process Finished Successfully.")
         print("*****************************************************************")
 
